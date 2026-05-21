@@ -26,8 +26,17 @@ const KEYS = {
 const MIN_BET = 5;
 const ADMIN_CREDENTIALS = {
   id: 'admin',
-  password: '1liA22@aa'
+  passwordHash: '28fda2f7f6b87d9802cf03923dd67723d929511ac8cc91fd298f711ebf4d3610'
 };
+
+// Helper for hashing password (SHA-256) to secure admin credentials
+async function hashPassword(password) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // Dividend multipliers
 const DIVIDENDS = {
@@ -846,7 +855,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 14-1. Login Form Submit
   const loginForm = document.getElementById('login-form');
-  loginForm.addEventListener('submit', (e) => {
+  loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const idInput = document.getElementById('login-id').value.trim();
     const pwInput = document.getElementById('login-pw').value;
@@ -855,7 +864,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Admin login check
     if (idInput === ADMIN_CREDENTIALS.id) {
-      if (pwInput === ADMIN_CREDENTIALS.password) {
+      const hashedInput = await hashPassword(pwInput);
+      if (hashedInput === ADMIN_CREDENTIALS.passwordHash) {
         state.currentUser = 'admin';
         saveSession();
         switchView();
