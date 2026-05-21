@@ -102,6 +102,18 @@ function showToast(message, type = 'success') {
 // 5. Initializers
 function getInitialStudents() {
   const list = [];
+  // Add 30717 student
+  list.push({
+    id: '30717',
+    name: '30717 학생',
+    password: '30717',
+    tokens: 1000,
+    bets: {
+      '1': 0, '2': 0, '3': 0, '4': 0, '5': 0,
+      '6': 0, '7': 0, '8': 0, '9': 0, '10': 0
+    }
+  });
+
   for (let i = 1; i <= 36; i++) {
     const studentId = `309${String(i).padStart(2, '0')}`;
     list.push({
@@ -906,7 +918,7 @@ document.addEventListener('DOMContentLoaded', () => {
         errorEl.classList.remove('hidden');
       }
     } else {
-      errorEl.innerText = '존재하지 않는 학번입니다. (30901~30936 사이)';
+      errorEl.innerText = '존재하지 않는 학번입니다. (30717 및 30901~30936 사이)';
       errorEl.classList.remove('hidden');
     }
   });
