@@ -446,20 +446,29 @@ function renderRankingBoard() {
   const rankingContainer = document.getElementById('ranking-list-container');
   rankingContainer.innerHTML = '';
 
-  // Sort students by tokens descending
-  const sortedStudents = [...state.students].sort((a, b) => b.tokens - a.tokens);
+  // Calculate total assets (tokens + total active bets)
+  const getStudentTotalAssets = (student) => {
+    const tokens = student.tokens || 0;
+    const betsSum = Object.values(student.bets || {}).reduce((sum, amount) => sum + amount, 0);
+    return tokens + betsSum;
+  };
+
+  // Sort students by total assets descending
+  const sortedStudents = [...state.students].sort((a, b) => getStudentTotalAssets(b) - getStudentTotalAssets(a));
 
   sortedStudents.forEach((student, index) => {
     const isCurrent = state.currentUser && state.currentUser.id === student.id;
     const item = document.createElement('div');
     item.className = `ranking-item ${isCurrent ? 'current-user' : ''}`;
     
+    const totalAssets = getStudentTotalAssets(student);
+    
     item.innerHTML = `
       <div class="ranking-left">
         <span class="rank-number">${index + 1}</span>
         <span class="rank-id">${student.id} 학생</span>
       </div>
-      <span class="rank-tokens">💰 ${student.tokens.toLocaleString()}</span>
+      <span class="rank-tokens">💰 ${totalAssets.toLocaleString()}</span>
     `;
     rankingContainer.appendChild(item);
   });
