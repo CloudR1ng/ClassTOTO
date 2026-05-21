@@ -1,13 +1,25 @@
 // ==========================================
-// 🌿 Lettuce TOTO - Core Business Logic
+// 🌿 Lettuce TOTO - Core Business Logic with Firebase
 // ==========================================
 
-// 1. Storage Keys
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  collection, 
+  getDocs, 
+  onSnapshot, 
+  runTransaction, 
+  writeBatch,
+  query,
+  orderBy
+} from "firebase/firestore";
+
+// 1. Storage Keys (for Local Session only)
 const KEYS = {
-  STUDENTS: 'lettuce_toto_students',
-  LETTUCE: 'lettuce_toto_lettuce',
-  SESSION: 'lettuce_toto_session',
-  HISTORY: 'lettuce_toto_history'
+  SESSION: 'lettuce_toto_session'
 };
 
 // 2. Constants & Settings
@@ -27,7 +39,21 @@ const DIVIDENDS = {
   others: 0.9  // 90% (10% loss)
 };
 
-// 3. State Management
+// 3. Firebase Config & Initialization
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// 4. State Management
 let state = {
   students: [],
   lettuce: [],
@@ -51,6 +77,7 @@ function showToast(message, type = 'success') {
   let icon = '🔔';
   if (type === 'success') icon = '✅';
   if (type === 'error') icon = '❌';
+  if (type === 'warning') icon = '⚠️';
   
   toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
   container.appendChild(toast);
@@ -63,7 +90,7 @@ function showToast(message, type = 'success') {
   }, 3000);
 }
 
-// 4. Initializers
+// 5. Initializers
 function getInitialStudents() {
   const list = [];
   for (let i = 1; i <= 36; i++) {
@@ -94,34 +121,94 @@ function getInitialLettuce() {
   return list;
 }
 
-function initData() {
-  // Load or Initialize Students
-  const storedStudents = localStorage.getItem(KEYS.STUDENTS);
-  if (storedStudents) {
-    state.students = JSON.parse(storedStudents);
-    // Backward compatibility for password if missing in old versions
-    state.students.forEach(s => {
-      if (!s.password) s.password = s.id;
+async function seedInitialDataIfEmpty() {
+  const studentQuery = await getDocs(collection(db, 'students'));
+  if (studentQuery.empty) {
+    console.log('DB가 비어 있습니다. 초기 데이터를 Firestore에 주입합니다...');
+    const batch = writeBatch(db);
+    
+    // Students Seed
+    const initialStudents = getInitialStudents();
+    initialStudents.forEach(student => {
+      const docRef = doc(db, 'students', student.id);
+      batch.set(docRef, student);
     });
-  } else {
-    state.students = getInitialStudents();
+    
+    // Lettuce Seed
+    const initialLettuce = getInitialLettuce();
+    initialLettuce.forEach(lettuce => {
+      const docRef = doc(db, 'lettuce', lettuce.id);
+      batch.set(docRef, lettuce);
+    });
+    
+    await batch.commit();
+    console.log('초기 데이터 주입 완료.');
   }
+}
 
-  // Load or Initialize Lettuce
-  const storedLettuce = localStorage.getItem(KEYS.LETTUCE);
-  if (storedLettuce) {
-    state.lettuce = JSON.parse(storedLettuce);
-  } else {
-    state.lettuce = getInitialLettuce();
-  }
+let isStudentsLoaded = false;
+let isLettuceLoaded = false;
+let isHistoryLoaded = false;
 
-  // Load History
-  const storedHistory = localStorage.getItem(KEYS.HISTORY);
-  if (storedHistory) {
-    state.history = JSON.parse(storedHistory);
-  } else {
-    state.history = [];
+function checkAllLoaded() {
+  if (isStudentsLoaded && isLettuceLoaded && isHistoryLoaded) {
+    // Refresh currentUser reference
+    if (state.currentUser && state.currentUser !== 'admin') {
+      const freshUser = state.students.find(s => s.id === state.currentUser.id);
+      if (freshUser) {
+        state.currentUser = freshUser;
+      }
+    }
+    switchView();
   }
+}
+
+function startFirestoreListeners() {
+  // 1. Students Listener
+  onSnapshot(collection(db, 'students'), (snapshot) => {
+    const studentsList = [];
+    snapshot.forEach(doc => {
+      studentsList.push(doc.data());
+    });
+    // Sort by student id ascending
+    studentsList.sort((a, b) => a.id.localeCompare(b.id));
+    state.students = studentsList;
+    isStudentsLoaded = true;
+    checkAllLoaded();
+  });
+
+  // 2. Lettuce Listener
+  onSnapshot(collection(db, 'lettuce'), (snapshot) => {
+    const lettuceList = [];
+    snapshot.forEach(doc => {
+      lettuceList.push(doc.data());
+    });
+    // Sort by lettuce id ascending
+    lettuceList.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    state.lettuce = lettuceList;
+    isLettuceLoaded = true;
+    checkAllLoaded();
+  });
+
+  // 3. History Listener
+  const historyQuery = query(collection(db, 'history'), orderBy('round', 'asc'));
+  onSnapshot(historyQuery, (snapshot) => {
+    const historyList = [];
+    snapshot.forEach(doc => {
+      historyList.push(doc.data());
+    });
+    state.history = historyList;
+    isHistoryLoaded = true;
+    checkAllLoaded();
+  });
+}
+
+async function initData() {
+  // Seed initial data if DB is empty
+  await seedInitialDataIfEmpty();
+
+  // Start Firestore Listeners
+  startFirestoreListeners();
 
   // Load Session
   const sessionUser = localStorage.getItem(KEYS.SESSION);
@@ -129,20 +216,14 @@ function initData() {
     if (sessionUser === 'admin') {
       state.currentUser = 'admin';
     } else {
-      const studentObj = state.students.find(s => s.id === sessionUser);
-      state.currentUser = studentObj || null;
+      state.currentUser = { id: sessionUser }; // Temp object, will sync in checkAllLoaded
     }
   } else {
     state.currentUser = null;
   }
-
-  saveData();
 }
 
-function saveData() {
-  localStorage.setItem(KEYS.STUDENTS, JSON.stringify(state.students));
-  localStorage.setItem(KEYS.LETTUCE, JSON.stringify(state.lettuce));
-  localStorage.setItem(KEYS.HISTORY, JSON.stringify(state.history));
+function saveSession() {
   if (state.currentUser) {
     localStorage.setItem(KEYS.SESSION, state.currentUser === 'admin' ? 'admin' : state.currentUser.id);
   } else {
@@ -150,7 +231,7 @@ function saveData() {
   }
 }
 
-// 5. Views Controller
+// 6. Views Controller
 function switchView() {
   // Hide all views first
   document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
@@ -168,11 +249,12 @@ function switchView() {
   }
 }
 
-// 6. Student Dashboard Renderer
+// 7. Student Dashboard Renderer
 function renderStudentDashboard() {
   if (!state.currentUser || state.currentUser === 'admin') return;
 
   const currentStudent = state.students.find(s => s.id === state.currentUser.id);
+  if (!currentStudent) return;
   state.currentUser = currentStudent; // Refresh reference
 
   // Update Header Badges
@@ -279,6 +361,9 @@ function renderStudentDashboard() {
 
   // Attach Bet Button Click Event
   document.querySelectorAll('.btn-bet').forEach(btn => {
+    btn.replaceWith(btn.cloneNode(true)); // remove listeners
+  });
+  document.querySelectorAll('.btn-bet').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const lettuceId = e.target.getAttribute('data-id');
       const inputEl = document.getElementById(`bet-input-${lettuceId}`);
@@ -289,6 +374,9 @@ function renderStudentDashboard() {
 
   // Attach Quick Bet Button Click Event
   document.querySelectorAll('.btn-quick').forEach(btn => {
+    btn.replaceWith(btn.cloneNode(true));
+  });
+  document.querySelectorAll('.btn-quick').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const lettuceId = e.target.getAttribute('data-id');
       const amount = parseInt(e.target.getAttribute('data-amount'));
@@ -298,6 +386,9 @@ function renderStudentDashboard() {
 
   // Attach Cancel Bet Button Click Event (Summary list)
   document.querySelectorAll('.btn-cancel-bet').forEach(btn => {
+    btn.replaceWith(btn.cloneNode(true));
+  });
+  document.querySelectorAll('.btn-cancel-bet').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const lettuceId = e.target.getAttribute('data-id');
       handleCancelBet(lettuceId);
@@ -305,6 +396,9 @@ function renderStudentDashboard() {
   });
 
   // Attach Cancel Bet Button Click Event (Lettuce Card)
+  document.querySelectorAll('.btn-cancel-card-bet').forEach(btn => {
+    btn.replaceWith(btn.cloneNode(true));
+  });
   document.querySelectorAll('.btn-cancel-card-bet').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const lettuceId = e.target.getAttribute('data-id');
@@ -316,7 +410,7 @@ function renderStudentDashboard() {
   renderRankingBoard();
 }
 
-// 7. Ranking Board Renderer
+// 8. Ranking Board Renderer
 function renderRankingBoard() {
   const rankingContainer = document.getElementById('ranking-list-container');
   rankingContainer.innerHTML = '';
@@ -340,7 +434,7 @@ function renderRankingBoard() {
   });
 }
 
-// 8. Admin Dashboard Renderer
+// 9. Admin Dashboard Renderer
 function renderAdminDashboard() {
   if (state.currentUser !== 'admin') return;
 
@@ -406,12 +500,12 @@ function renderAdminLettuceStats() {
 function renderAdminStudentTable() {
   const tableBody = document.getElementById('admin-student-table-body');
   const searchInput = document.getElementById('student-search-input');
-  const query = searchInput ? searchInput.value.trim() : '';
+  const queryVal = searchInput ? searchInput.value.trim() : '';
 
   tableBody.innerHTML = '';
   
   state.students
-    .filter(student => student.id.includes(query))
+    .filter(student => student.id.includes(queryVal))
     .forEach(student => {
       const totalBet = Object.values(student.bets).reduce((a, b) => a + b, 0);
       const tr = document.createElement('tr');
@@ -459,20 +553,12 @@ function renderHistoryLogs() {
   });
 }
 
-// 9. Betting Action Handler
-function handleBet(lettuceId, amount) {
+// 10. Betting Action Handler
+async function handleBet(lettuceId, amount) {
   if (!state.currentUser || state.currentUser === 'admin') return;
 
-  const currentStudent = state.students.find(s => s.id === state.currentUser.id);
-  
-  // Validation checks
-  if (isNaN(amount) || amount <= 0) {
+  if (isNaN(amount) || amount <= 0 || !Number.isInteger(amount)) {
     showToast('올바른 베팅 금액을 입력하세요.', 'error');
-    return;
-  }
-  
-  if (!Number.isInteger(amount)) {
-    showToast('베팅 금액은 정수 단위여야 합니다.', 'error');
     return;
   }
 
@@ -481,132 +567,171 @@ function handleBet(lettuceId, amount) {
     return;
   }
 
-  if (amount > currentStudent.tokens) {
-    showToast('보유하고 있는 토큰 잔액을 초과하여 베팅할 수 없습니다.', 'error');
-    return;
+  const studentRef = doc(db, 'students', state.currentUser.id);
+  const lettuceRef = doc(db, 'lettuce', lettuceId);
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      const studentDoc = await transaction.get(studentRef);
+      const lettuceDoc = await transaction.get(lettuceRef);
+
+      if (!studentDoc.exists() || !lettuceDoc.exists()) {
+        throw new Error('데이터가 존재하지 않습니다.');
+      }
+
+      const studentData = studentDoc.data();
+      const lettuceData = lettuceDoc.data();
+
+      if (amount > studentData.tokens) {
+        throw new Error('보유하고 있는 토큰 잔액을 초과하여 베팅할 수 없습니다.');
+      }
+
+      const newTokens = studentData.tokens - amount;
+      const currentBets = studentData.bets || {};
+      const newBets = {
+        ...currentBets,
+        [lettuceId]: (currentBets[lettuceId] || 0) + amount
+      };
+      const newLettuceTotal = (lettuceData.totalBets || 0) + amount;
+
+      transaction.update(studentRef, { tokens: newTokens, bets: newBets });
+      transaction.update(lettuceRef, { totalBets: newLettuceTotal });
+    });
+
+    showToast(`상추 ${lettuceId}호에 💰 ${amount.toLocaleString()} 토큰을 성공적으로 베팅했습니다!`, 'success');
+  } catch (err) {
+    showToast(err.message || '베팅 중 오류가 발생했습니다.', 'error');
   }
-
-  // Execute Bet
-  currentStudent.tokens -= amount;
-  currentStudent.bets[lettuceId] = (currentStudent.bets[lettuceId] || 0) + amount;
-
-  // Add to Lettuce Total
-  const lettuceItem = state.lettuce.find(item => item.id === lettuceId);
-  lettuceItem.totalBets += amount;
-
-  // Save and re-render
-  saveData();
-  renderStudentDashboard();
-  showToast(`상추 ${lettuceId}호에 💰 ${amount.toLocaleString()} 토큰을 성공적으로 베팅했습니다!`, 'success');
 }
 
-// 9-2. Cancel Bet Action Handler
-function handleCancelBet(lettuceId) {
+// 10-2. Cancel Bet Action Handler
+async function handleCancelBet(lettuceId) {
   if (!state.currentUser || state.currentUser === 'admin') return;
 
-  const currentStudent = state.students.find(s => s.id === state.currentUser.id);
-  const amount = currentStudent.bets[lettuceId] || 0;
+  const studentRef = doc(db, 'students', state.currentUser.id);
+  const lettuceRef = doc(db, 'lettuce', lettuceId);
 
-  if (amount <= 0) {
-    showToast('해당 상추에 건 베팅이 없습니다.', 'error');
-    return;
+  try {
+    await runTransaction(db, async (transaction) => {
+      const studentDoc = await transaction.get(studentRef);
+      const lettuceDoc = await transaction.get(lettuceRef);
+
+      if (!studentDoc.exists() || !lettuceDoc.exists()) {
+        throw new Error('데이터가 존재하지 않습니다.');
+      }
+
+      const studentData = studentDoc.data();
+      const lettuceData = lettuceDoc.data();
+      const amount = studentData.bets[lettuceId] || 0;
+
+      if (amount <= 0) {
+        throw new Error('해당 상추에 건 베팅이 없습니다.');
+      }
+
+      const newTokens = studentData.tokens + amount;
+      const newBets = { ...studentData.bets, [lettuceId]: 0 };
+      const newLettuceTotal = Math.max(0, (lettuceData.totalBets || 0) - amount);
+
+      transaction.update(studentRef, { tokens: newTokens, bets: newBets });
+      transaction.update(lettuceRef, { totalBets: newLettuceTotal });
+    });
+
+    showToast(`상추 ${lettuceId}호의 베팅이 성공적으로 취소 및 환불되었습니다.`, 'success');
+  } catch (err) {
+    showToast(err.message || '베팅 취소 중 오류가 발생했습니다.', 'error');
   }
-
-  // Restore tokens
-  currentStudent.tokens += amount;
-  currentStudent.bets[lettuceId] = 0;
-
-  // Subtract from Lettuce Total
-  const lettuceItem = state.lettuce.find(item => item.id === lettuceId);
-  lettuceItem.totalBets -= amount;
-  if (lettuceItem.totalBets < 0) lettuceItem.totalBets = 0; // Safeguard
-
-  // Save and re-render
-  saveData();
-  renderStudentDashboard();
-  showToast(`상추 ${lettuceId}호의 베팅(💰 ${amount.toLocaleString()} 토큰)이 성공적으로 취소되었습니다.`, 'success');
 }
 
-// 10. Admin Settlement Action Handler
-function handleSettlement(ranks) {
-  // Check duplicates in ranks
+// 11. Admin Settlement Action Handler
+async function handleSettlement(ranks) {
   const uniqueRanks = new Set(ranks);
   if (uniqueRanks.size !== 5) {
     showToast('1위부터 5위 상추를 중복 없이 모두 지정해야 합니다.', 'error');
     return;
   }
 
-  let totalBetsCount = 0;
-  let totalDistributedCount = 0;
-  let participantsCount = 0;
+  showToast('정산을 진행 중입니다...', 'warning');
 
-  // Count total bets across all lettuce
-  const totalBetsVolume = state.lettuce.reduce((sum, item) => sum + item.totalBets, 0);
+  try {
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    
+    const round = state.history.length + 1;
+    let totalBetsVolume = state.lettuce.reduce((sum, item) => sum + item.totalBets, 0);
+    let totalDistributedCount = 0;
+    let participantsCount = 0;
 
-  // Process settlement for each student
-  state.students.forEach(student => {
-    let studentEarned = 0;
-    let studentHasBet = false;
+    await runTransaction(db, async (transaction) => {
+      const studentRefs = state.students.map(s => doc(db, 'students', s.id));
+      const lettuceRefs = state.lettuce.map(l => doc(db, 'lettuce', l.id));
 
-    Object.entries(student.bets).forEach(([lettuceId, betAmount]) => {
-      if (betAmount > 0) {
-        studentHasBet = true;
-        totalBetsCount += betAmount;
+      const studentDocs = await Promise.all(studentRefs.map(ref => transaction.get(ref)));
+      
+      studentDocs.forEach((sDoc, idx) => {
+        const studentData = sDoc.data();
+        let studentEarned = 0;
+        let studentHasBet = false;
 
-        // Apply dividend rate
-        if (lettuceId === ranks[0]) {
-          studentEarned += betAmount * DIVIDENDS.rank1; // 500%
-        } else if (lettuceId === ranks[1]) {
-          studentEarned += betAmount * DIVIDENDS.rank2; // 400%
-        } else if (lettuceId === ranks[2]) {
-          studentEarned += betAmount * DIVIDENDS.rank3; // 300%
-        } else if (lettuceId === ranks[3]) {
-          studentEarned += betAmount * DIVIDENDS.rank4; // 200%
-        } else if (lettuceId === ranks[4]) {
-          studentEarned += betAmount * DIVIDENDS.rank5; // 150%
+        Object.entries(studentData.bets || {}).forEach(([lettuceId, betAmount]) => {
+          if (betAmount > 0) {
+            studentHasBet = true;
+
+            if (lettuceId === ranks[0]) {
+              studentEarned += betAmount * DIVIDENDS.rank1;
+            } else if (lettuceId === ranks[1]) {
+              studentEarned += betAmount * DIVIDENDS.rank2;
+            } else if (lettuceId === ranks[2]) {
+              studentEarned += betAmount * DIVIDENDS.rank3;
+            } else if (lettuceId === ranks[3]) {
+              studentEarned += betAmount * DIVIDENDS.rank4;
+            } else if (lettuceId === ranks[4]) {
+              studentEarned += betAmount * DIVIDENDS.rank5;
+            } else {
+              studentEarned += betAmount * DIVIDENDS.others;
+            }
+          }
+        });
+
+        const nextBets = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0, '7': 0, '8': 0, '9': 0, '10': 0 };
+        
+        if (studentHasBet) {
+          participantsCount++;
+          const roundedEarning = Math.floor(studentEarned);
+          totalDistributedCount += roundedEarning;
+          transaction.update(studentRefs[idx], {
+            tokens: studentData.tokens + roundedEarning,
+            bets: nextBets
+          });
         } else {
-          studentEarned += betAmount * DIVIDENDS.others; // 90%
+          transaction.update(studentRefs[idx], {
+            bets: nextBets
+          });
         }
-      }
+      });
+
+      lettuceRefs.forEach(ref => {
+        transaction.update(ref, { totalBets: 0 });
+      });
+
+      const historyRef = doc(collection(db, 'history'));
+      transaction.set(historyRef, {
+        round: round,
+        date: dateStr,
+        ranks: ranks,
+        totalBets: totalBetsVolume,
+        totalDistributed: totalDistributedCount,
+        participatedStudents: participantsCount
+      });
     });
 
-    if (studentHasBet) {
-      participantsCount++;
-      // Round down to keep integer token
-      const roundedEarning = Math.floor(studentEarned);
-      student.tokens += roundedEarning;
-      totalDistributedCount += roundedEarning;
-    }
-
-    // Reset student bets for next week
-    Object.keys(student.bets).forEach(key => student.bets[key] = 0);
-  });
-
-  // Reset lettuce total bets
-  state.lettuce.forEach(item => item.totalBets = 0);
-
-  // Save history log
-  const round = state.history.length + 1;
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  
-  state.history.push({
-    round: round,
-    date: dateStr,
-    ranks: ranks,
-    totalBets: totalBetsVolume,
-    totalDistributed: totalDistributedCount,
-    participatedStudents: participantsCount
-  });
-
-  // Save to storage and refresh
-  saveData();
-  renderAdminDashboard();
-  showToast(`총 💰 ${totalDistributedCount.toLocaleString()} 토큰 정산이 완료되었습니다! 모든 베팅액은 리셋되었습니다.`, 'success');
+    showToast(`정산이 완료되었습니다! 총 💰 ${totalDistributedCount.toLocaleString()} 토큰이 배분되었습니다.`, 'success');
+  } catch (err) {
+    showToast('정산 처리 중 오류가 발생했습니다: ' + err.message, 'error');
+  }
 }
 
-// 11. Password Change Handler
-function handlePasswordChange(currentPw, newPw, confirmPw) {
+// 12. Password Change Handler
+async function handlePasswordChange(currentPw, newPw, confirmPw) {
   if (!state.currentUser || state.currentUser === 'admin') return;
 
   const currentStudent = state.students.find(s => s.id === state.currentUser.id);
@@ -634,42 +759,70 @@ function handlePasswordChange(currentPw, newPw, confirmPw) {
     return;
   }
 
-  // Update Password
-  currentStudent.password = newPw;
-  saveData();
-  
-  successEl.classList.remove('hidden');
-  document.getElementById('pwd-change-form').reset();
-  showToast('비밀번호가 안전하게 변경되었습니다.', 'success');
+  try {
+    const studentRef = doc(db, 'students', state.currentUser.id);
+    await setDoc(studentRef, { password: newPw }, { merge: true });
+    
+    successEl.classList.remove('hidden');
+    document.getElementById('pwd-change-form').reset();
+    showToast('비밀번호가 성공적으로 변경되었습니다.', 'success');
 
-  setTimeout(() => {
-    document.getElementById('pwd-change-modal').classList.add('hidden');
-    successEl.classList.add('hidden');
-  }, 1500);
+    setTimeout(() => {
+      document.getElementById('pwd-change-modal').classList.add('hidden');
+      successEl.classList.add('hidden');
+    }, 1500);
+  } catch (err) {
+    errorEl.innerText = '비밀번호 변경 실패: ' + err.message;
+    errorEl.classList.remove('hidden');
+  }
 }
 
-// 12. Reset All Data Action (for Admin Panel)
-function handleResetAllData() {
+// 13. Reset All Data Action (for Admin Panel)
+async function handleResetAllData() {
   if (!confirm('정말로 모든 학생의 자산 및 정산 내역을 초기화하시겠습니까? (이 작업은 되돌릴 수 없습니다)')) {
     return;
   }
 
-  state.students = getInitialStudents();
-  state.lettuce = getInitialLettuce();
-  state.history = [];
-  state.currentUser = null;
-  saveData();
-  switchView();
-  showToast('모든 데이터가 성공적으로 초기화되었습니다!', 'success');
+  showToast('데이터 초기화 중...', 'warning');
+
+  try {
+    const historyQuery = await getDocs(collection(db, 'history'));
+    const batch = writeBatch(db);
+
+    historyQuery.forEach(docSnapshot => {
+      batch.delete(docSnapshot.ref);
+    });
+
+    const initialStudents = getInitialStudents();
+    initialStudents.forEach(student => {
+      const studentRef = doc(db, 'students', student.id);
+      batch.set(studentRef, student);
+    });
+
+    const initialLettuce = getInitialLettuce();
+    initialLettuce.forEach(lettuce => {
+      const lettuceRef = doc(db, 'lettuce', lettuce.id);
+      batch.set(lettuceRef, lettuce);
+    });
+
+    await batch.commit();
+
+    state.currentUser = null;
+    saveSession();
+    switchView();
+    showToast('모든 데이터가 성공적으로 초기화되었습니다!', 'success');
+  } catch (err) {
+    showToast('초기화 중 오류가 발생했습니다: ' + err.message, 'error');
+  }
 }
 
-// 13. Event Listeners Setup
+// 14. Event Listeners Setup
 document.addEventListener('DOMContentLoaded', () => {
   // Initialize App Data
   initData();
   switchView();
 
-  // 13-1. Login Form Submit
+  // 14-1. Login Form Submit
   const loginForm = document.getElementById('login-form');
   loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -682,7 +835,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (idInput === ADMIN_CREDENTIALS.id) {
       if (pwInput === ADMIN_CREDENTIALS.password) {
         state.currentUser = 'admin';
-        saveData();
+        saveSession();
         switchView();
         showToast('관리자 계정으로 로그인했습니다.', 'success');
       } else {
@@ -697,7 +850,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (student) {
       if (student.password === pwInput) {
         state.currentUser = student;
-        saveData();
+        saveSession();
         switchView();
         showToast(`${student.id} 학생으로 로그인했습니다.`, 'success');
       } else {
@@ -710,11 +863,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 13-2. Logout Button Action
+  // 14-2. Logout Button Action
   const logoutStudentBtn = document.getElementById('btn-student-logout');
   logoutStudentBtn.addEventListener('click', () => {
     state.currentUser = null;
-    saveData();
+    saveSession();
     switchView();
     showToast('로그아웃되었습니다.', 'success');
   });
@@ -722,12 +875,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const logoutAdminBtn = document.getElementById('btn-admin-logout');
   logoutAdminBtn.addEventListener('click', () => {
     state.currentUser = null;
-    saveData();
+    saveSession();
     switchView();
     showToast('로그아웃되었습니다.', 'success');
   });
 
-  // 13-3. Password Change Modal Actions
+  // 14-3. Password Change Modal Actions
   const openPwdModalBtn = document.getElementById('btn-change-pw-open');
   openPwdModalBtn.addEventListener('click', () => {
     document.getElementById('pwd-change-error').classList.add('hidden');
@@ -758,19 +911,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 13-4. Admin: Search student input keyup
+  // 14-4. Admin: Search student input keyup
   const searchInput = document.getElementById('student-search-input');
   searchInput.addEventListener('input', () => {
     renderAdminStudentTable();
   });
 
-  // 13-5. Admin: Reset all data action
+  // 14-5. Admin: Reset all data action
   const resetBtn = document.getElementById('btn-reset-all-data');
   resetBtn.addEventListener('click', () => {
     handleResetAllData();
   });
 
-  // 13-6. Admin: Settlement Form Submit
+  // 14-6. Admin: Settlement Form Submit
   const settlementForm = document.getElementById('settlement-form');
   settlementForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -781,13 +934,5 @@ document.addEventListener('DOMContentLoaded', () => {
     const rank5 = document.getElementById('rank-5').value;
 
     handleSettlement([rank1, rank2, rank3, rank4, rank5]);
-  });
-
-  // 13-7. Real-time Multi-Tab Sync via Storage Event
-  window.addEventListener('storage', (e) => {
-    if (Object.values(KEYS).includes(e.key)) {
-      initData();
-      switchView();
-    }
   });
 });
