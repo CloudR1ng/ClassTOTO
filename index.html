@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/ClassTOTO/assets/index-1QaBleCa.js"></script>
+    <script type="module" crossorigin src="/ClassTOTO/assets/index-CnpDUX2L.js"></script>
     <link rel="stylesheet" crossorigin href="/ClassTOTO/assets/index-C7fhWFbT.css">
   </head>
   <body>
@@ -93,8 +93,8 @@
             <!-- Realtime Ranking Board -->
             <div class="ranking-card">
               <div class="ranking-header">
-                <h3>🏆 실시간 3학년 9반 랭킹</h3>
-                <span class="ranking-sub">전체 36명</span>
+                <h3>🏆 실시간 랭킹</h3>
+                <span class="ranking-sub" id="ranking-total-count">전체 36명</span>
               </div>
               <div class="ranking-list" id="ranking-list-container">
                 <!-- Ranking items will be dynamically rendered here -->
@@ -187,6 +187,10 @@
               <div class="users-header">
                 <h3>👥 학생 자산 현황</h3>
                 <button id="btn-reset-all-data" class="btn-warning-sm">전체 데이터 초기화</button>
+              </div>
+              <div class="add-student-box" style="margin-bottom: 15px; display: flex; gap: 8px;">
+                <input type="text" id="admin-add-student-id" placeholder="추가할 학번 (예: 30xxx)" style="flex: 1; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.6); font-family: inherit; font-size: 0.9rem;" />
+                <button id="btn-admin-add-student" class="btn-primary" style="padding: 10px 16px; font-size: 0.9rem; white-space: nowrap; box-shadow: none; border-radius: var(--radius-sm);">추가</button>
               </div>
               <div class="search-box">
                 <input type="text" id="student-search-input" placeholder="학번 검색..." />
