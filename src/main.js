@@ -122,27 +122,36 @@ function getInitialLettuce() {
 }
 
 async function seedInitialDataIfEmpty() {
-  const studentQuery = await getDocs(collection(db, 'students'));
-  if (studentQuery.empty) {
-    console.log('DB가 비어 있습니다. 초기 데이터를 Firestore에 주입합니다...');
-    const batch = writeBatch(db);
-    
-    // Students Seed
-    const initialStudents = getInitialStudents();
-    initialStudents.forEach(student => {
-      const docRef = doc(db, 'students', student.id);
-      batch.set(docRef, student);
-    });
-    
-    // Lettuce Seed
-    const initialLettuce = getInitialLettuce();
-    initialLettuce.forEach(lettuce => {
-      const docRef = doc(db, 'lettuce', lettuce.id);
-      batch.set(docRef, lettuce);
-    });
-    
-    await batch.commit();
-    console.log('초기 데이터 주입 완료.');
+  try {
+    const studentQuery = await getDocs(collection(db, 'students'));
+    if (studentQuery.empty) {
+      console.log('DB가 비어 있습니다. 초기 데이터를 Firestore에 주입합니다...');
+      const batch = writeBatch(db);
+      
+      // Students Seed
+      const initialStudents = getInitialStudents();
+      initialStudents.forEach(student => {
+        const docRef = doc(db, 'students', student.id);
+        batch.set(docRef, student);
+      });
+      
+      // Lettuce Seed
+      const initialLettuce = getInitialLettuce();
+      initialLettuce.forEach(lettuce => {
+        const docRef = doc(db, 'lettuce', lettuce.id);
+        batch.set(docRef, lettuce);
+      });
+      
+      await batch.commit();
+      console.log('초기 데이터 주입 완료.');
+    }
+  } catch (error) {
+    console.error('초기 데이터 조회/주입 중 오류 발생:', error);
+    if (error.code === 'permission-denied') {
+      showToast('Firebase Firestore 권한 오류! 보안 규칙(Security Rules)을 허용으로 설정해주세요.', 'error');
+    } else {
+      showToast('DB 초기화 실패: ' + error.message, 'error');
+    }
   }
 }
 
@@ -175,6 +184,13 @@ function startFirestoreListeners() {
     state.students = studentsList;
     isStudentsLoaded = true;
     checkAllLoaded();
+  }, (error) => {
+    console.error("Students Listener Error:", error);
+    if (error.code === 'permission-denied') {
+      showToast('학번 데이터 로드 실패: Firestore 보안 규칙을 확인하세요.', 'error');
+    } else {
+      showToast('학번 로드 실패: ' + error.message, 'error');
+    }
   });
 
   // 2. Lettuce Listener
@@ -188,6 +204,9 @@ function startFirestoreListeners() {
     state.lettuce = lettuceList;
     isLettuceLoaded = true;
     checkAllLoaded();
+  }, (error) => {
+    console.error("Lettuce Listener Error:", error);
+    showToast('상추 데이터 로드 실패: ' + error.message, 'error');
   });
 
   // 3. History Listener
@@ -200,6 +219,9 @@ function startFirestoreListeners() {
     state.history = historyList;
     isHistoryLoaded = true;
     checkAllLoaded();
+  }, (error) => {
+    console.error("History Listener Error:", error);
+    showToast('정산 기록 로드 실패: ' + error.message, 'error');
   });
 }
 
@@ -842,6 +864,13 @@ document.addEventListener('DOMContentLoaded', () => {
         errorEl.innerText = '관리자 비밀번호가 일치하지 않습니다.';
         errorEl.classList.remove('hidden');
       }
+      return;
+    }
+
+    // Check if Firestore data is loaded
+    if (!isStudentsLoaded) {
+      errorEl.innerText = '클라우드 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.';
+      errorEl.classList.remove('hidden');
       return;
     }
 
